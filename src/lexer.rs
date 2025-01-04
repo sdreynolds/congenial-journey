@@ -1,8 +1,10 @@
 use std::{error::Error, fs, iter::Peekable};
 
 extern crate unicode_segmentation;
+extern crate string_builder;
 
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
+use string_builder::Builder;
 
 type Offset = usize;
 
@@ -38,9 +40,7 @@ pub enum Token {
     Plus(Offset),
     Dollar(Offset),
 
-
-    Comment,
-    Whitespace,
+    String(Offset, String),
 
     EOF(Offset)
 }
@@ -75,10 +75,36 @@ impl <'source> Lexer<'source> {
         }
     }
 
+    fn lex_string(&mut self) -> Result<Token, Box<dyn Error>> {
+        let mut closed_string = false;
+        let mut builder = Builder::default();
+        let start_pos = self.pos - 1;
+        while let Some(head) = self.advance() {
+            if head == "\"" {
+                closed_string = true;
+                break;
+            }
+            else {
+                // append to new value
+                builder.append(head);
+            }
+        }
+
+        if !closed_string {
+            Err("Didn't close string".into())
+        } else {
+            match builder.string() {
+                Ok(s) => Ok(Token::String(start_pos, s)),
+                Err(_failure) => Err("Failed to build string".into())
+            }
+        }
+    }
+
     fn match_pos_and_advance(&mut self, expected: char) -> bool {
         let mut char_buf: [u8; 4] = [0; 4];
         // This implies match_pos_and_advance can only be called with ASCII. It is used for the main grammar
         // not used for parsing identifiers or strings.
+        // @TODO: define these as constants so we don't have to do all this "Stuff"
         let expected: &str = expected.encode_utf8(&mut char_buf);
 
         match self.file_contents.peek() {
@@ -101,6 +127,8 @@ impl <'source> Lexer<'source> {
                 // @TODO: should have a line counter and update that for each \n
                 Ok(None)
             },
+
+            Some("\"") => self.lex_string().map(|token| Some(token)),
 
             Some("[") => Ok(Some(Token::BracketOpen(self.pos))),
             Some("]") => Ok(Some(Token::BracketClose(self.pos))),
@@ -186,6 +214,17 @@ pub fn run_file(path: &str) -> Result<Vec<Token>, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    pub fn raw_string() -> Result<(), Box<dyn Error>> {
+        let expected_string = "multiword string is\nhere";
+        let mut lexer = Lexer::new("\"multiword string is\nhere\"");
+        let tokens = lexer.tokenize()?;
+        assert_eq!(tokens.len(), 2);
+
+        assert_eq!(tokens[0], Token::String(0, String::from(expected_string)));
+        Ok(())
+    }
 
     #[test]
     pub fn raw_true() -> Result<(), Box<dyn Error>> {
