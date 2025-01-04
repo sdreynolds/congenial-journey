@@ -27,7 +27,7 @@ pub enum Token {
     DoubleEqual(Offset),
     Semicolon(Offset),
 
-    Number(f64, Offset),
+    Number(Offset, f64),
 
     Local(Offset),
 
@@ -49,6 +49,10 @@ struct Lexer<'source> {
     file_contents: Peekable<Graphemes<'source>>,
     file_position: (u32, u32),
     pos: Offset,
+}
+
+fn is_digit(c: char) -> bool {
+    c >= '0' && c <= '9'
 }
 
 impl <'source> Lexer<'source> {
@@ -75,6 +79,47 @@ impl <'source> Lexer<'source> {
         }
     }
 
+    fn lex_number(&mut self, mut builder: Builder) -> Result<Token, Box<dyn Error>> {
+        let mut parse_decimal = false;
+        let start = self.pos - 1;
+        while let Some(head) = self.file_contents.peek() {
+            let valid_digit = head.chars().nth(0).map(is_digit).unwrap_or_default();
+            if valid_digit {
+                builder.append(*head);
+                self.advance();
+            } else {
+                if *head == "." {
+                    parse_decimal = true;
+                    builder.append(*head);
+                    self.advance();
+                }
+                break;
+            }
+        }
+
+        if parse_decimal {
+            while let Some(head) = self.file_contents.peek() {
+                let valid_digit = head.chars().nth(0).map(is_digit).unwrap_or_default();
+                if valid_digit {
+                    builder.append(*head);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        match builder.string() {
+            Ok(s) => {
+                match s.parse::<f64>() {
+                    Ok(number) => Ok(Token::Number(start, number)),
+                    Err(_failed_parse) => Err("Failed to parse number".into())
+                }
+
+            },
+            Err(_falure) => Err("failed to build number".into())
+        }
+    }
+
     fn lex_string(&mut self) -> Result<Token, Box<dyn Error>> {
         let mut closed_string = false;
         let mut builder = Builder::default();
@@ -87,6 +132,7 @@ impl <'source> Lexer<'source> {
             else {
                 // append to new value
                 builder.append(head);
+                // @TODO: if head == "\n", need to increment line counter.
             }
         }
 
@@ -186,7 +232,17 @@ impl <'source> Lexer<'source> {
                 }
             },
 
-            _ => Err("Unkown token".into())
+            Some(lexme) => {
+                let valid_digit = lexme.chars().nth(0).map(is_digit).unwrap_or_default();
+                if valid_digit {
+                    let mut builder = Builder::default();
+                    builder.append(lexme);
+                    self.lex_number(builder).map(|token| Some(token))
+                } else {
+                    Err("Unkown token".into())
+                }}
+                ,
+            None => Err("Bad input".into())
         }
     }
 
@@ -223,6 +279,17 @@ mod tests {
         assert_eq!(tokens.len(), 2);
 
         assert_eq!(tokens[0], Token::String(0, String::from(expected_string)));
+        Ok(())
+    }
+
+    #[test]
+    pub fn raw_int() -> Result<(), Box<dyn Error>> {
+        let expected_int = 64.0;
+        let mut lexer = Lexer::new("64");
+        let tokens = lexer.tokenize()?;
+        assert_eq!(tokens.len(), 2);
+
+        assert_eq!(tokens[0], Token::Number(0, expected_int));
         Ok(())
     }
 
