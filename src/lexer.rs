@@ -3,6 +3,7 @@ use std::{error::Error, fs, iter::Peekable};
 extern crate unicode_segmentation;
 extern crate string_builder;
 
+use phf::phf_map;
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 use string_builder::Builder;
 
@@ -47,6 +48,17 @@ pub enum Token {
     EOF(Offset)
 }
 
+enum Keyword {
+    True,
+    False,
+}
+
+static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
+    "true" => Keyword::True,
+    "false" => Keyword::False,
+};
+
+
 const RESERVED_CHARS: [char; 20] = [
     '!',
     '=',
@@ -82,12 +94,16 @@ fn is_digit(c: char) -> bool {
 }
 
 fn is_alpha(c: char) -> bool {
-    for reserved_char in &RESERVED_CHARS {
-        if *reserved_char == c {
-            return false;
+    if is_digit(c) {
+        false
+    } else {
+        for reserved_char in &RESERVED_CHARS {
+            if *reserved_char == c {
+                return false;
+            }
         }
+        true
     }
-    return true
 }
 
 fn is_alpha_numeric(c: char) -> bool {
@@ -305,7 +321,22 @@ impl <'source> Lexer<'source> {
                 } else if valid_alpha {
                     let mut builder = Builder::default();
                     builder.append(lexme);
-                    self.lex_identifier(builder).map(|token| Some(token))
+
+                    let identifier_token = self.lex_identifier(builder);
+
+                    identifier_token.map(|token| {
+                        if let Token::Identifier(offset, name) = token {
+                            match KEYWORDS.get(&name) {
+                                Some(keyword) => match keyword {
+                                    Keyword::True => Some(Token::Bool(offset, true)),
+                                    Keyword::False => Some(Token::Bool(offset, false))
+                                },
+                                _ => Some(Token::Identifier(offset, name))
+                            }
+                        } else {
+                            Some(token)
+                        }
+                    })
 
                 } else {
                     Err(format!("Unkown token {lexme}").into())
@@ -440,7 +471,9 @@ mod tests {
         let expected_tokens = vec![
             Token::BraceOpen(0),
             Token::Bool(1, true),
+            Token::Comma(5),
             Token::Bool(7, false),
+            Token::Comma(12),
             Token::Bool(14, true),
             Token::BraceClose(18),
             Token::EOF(19)
@@ -454,15 +487,11 @@ mod tests {
     pub fn wrong_place_for_comma() -> Result<(), Box<dyn Error>> {
         let mut lexer = Lexer::new("true,");
         let tokens = lexer.tokenize()?;
-        assert_eq!(tokens.len(), 6);
 
         let expected_tokens = vec![
-            Token::BraceOpen(0),
-            Token::Bool(1, true),
-            Token::Bool(7, false),
-            Token::Bool(14, true),
-            Token::BraceClose(18),
-            Token::EOF(19)
+            Token::Bool(0, true),
+            Token::Comma(4),
+            Token::EOF(5)
         ];
 
         assert_eq!(tokens, expected_tokens);
@@ -473,15 +502,15 @@ mod tests {
     pub fn array_missing_comma() -> Result<(), Box<dyn Error>> {
         let mut lexer = Lexer::new("[true false, true]");
         let tokens = lexer.tokenize()?;
-        assert_eq!(tokens.len(), 6);
 
         let expected_tokens = vec![
             Token::BraceOpen(0),
             Token::Bool(1, true),
-            Token::Bool(7, false),
-            Token::Bool(14, true),
-            Token::BraceClose(18),
-            Token::EOF(19)
+            Token::Bool(6, false),
+            Token::Comma(11),
+            Token::Bool(13, true),
+            Token::BraceClose(17),
+            Token::EOF(18)
         ];
 
         assert_eq!(tokens, expected_tokens);
