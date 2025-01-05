@@ -127,12 +127,14 @@ impl <'source> Lexer<'source> {
         let next_char = self.file_contents.next();
         // @TODO: this assumes 1 byte == 1 advance. This isn't true for utf-8.
         self.pos += 1;
+        self.file_position.1 += 1;
         next_char
     }
 
     fn consume_comment(&mut self) {
         while let Some(head) = self.advance() {
             if head == "\n" {
+                self.file_position.0 += 1;
                 break;
             }
         }
@@ -206,10 +208,13 @@ impl <'source> Lexer<'source> {
                 closed_string = true;
                 break;
             }
+            else if head == "\n" || head == "\r\n" {
+                // Multiline strings are invalid.
+                break;
+            }
             else {
                 // append to new value
                 builder.append(head);
-                // @TODO: if head == "\n", need to increment line counter.
             }
         }
 
@@ -247,7 +252,7 @@ impl <'source> Lexer<'source> {
             // Ignore Whitespace
             Some(" ") | Some("\r") | Some("\t") => Ok(None),
             Some("\n") | Some("\r\n")=> {
-                // @TODO: should have a line counter and update that for each \n
+                self.file_position.0 += 1;
                 Ok(None)
             },
 
@@ -373,8 +378,8 @@ mod tests {
 
     #[test]
     pub fn raw_string() -> Result<(), Box<dyn Error>> {
-        let expected_string = "multiword string is\nhere";
-        let mut lexer = Lexer::new("\"multiword string is\nhere\"");
+        let expected_string = "multiword string is here";
+        let mut lexer = Lexer::new("\"multiword string is here\"");
         let tokens = lexer.tokenize()?;
         assert_eq!(tokens.len(), 2);
 
