@@ -246,7 +246,7 @@ impl <'source> Lexer<'source> {
         match self.advance() {
             // Ignore Whitespace
             Some(" ") | Some("\r") | Some("\t") => Ok(None),
-            Some("\n") => {
+            Some("\n") | Some("\r\n")=> {
                 // @TODO: should have a line counter and update that for each \n
                 Ok(None)
             },
@@ -415,11 +415,11 @@ mod tests {
 
     #[test]
     pub fn empty_string() -> Result<(), Box<dyn Error>> {
-        let mut lexer = Lexer::new("");
+        let mut lexer = Lexer::new("\r\n");
         let tokens = lexer.tokenize()?;
         assert_eq!(tokens.len(), 1);
 
-        assert_eq!(tokens[0], Token::EOF(0));
+        assert_eq!(tokens[0], Token::EOF(1));
         Ok(())
     }
 
