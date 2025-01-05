@@ -13,7 +13,7 @@ type Offset = usize;
 pub enum Token {
     Bang(Offset),
     BangEqual(Offset),
-    Bool(Offset,  bool),
+
     BraceOpen(Offset),
     BraceClose(Offset),
 
@@ -41,23 +41,66 @@ pub enum Token {
     Dollar(Offset),
 
     String(Offset, String),
+    Identifier(Offset, String),
 
+    Bool(Offset,  bool),
     EOF(Offset)
 }
+
+const RESERVED_CHARS: [char; 20] = [
+    '!',
+    '=',
+    '[',
+    ']',
+    '{',
+    '}',
+    ':',
+    ',',
+    ';',
+    '>',
+    '<',
+    '.',
+    '+',
+    '$',
+    '&',
+    '|',
+
+    '\n',
+    '\t',
+    '\r',
+    ' '
+];
 
 struct Lexer<'source> {
     file_contents: Peekable<Graphemes<'source>>,
     file_position: (u32, u32),
-    pos: Offset,
+    pos: Offset
 }
 
 fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
 }
 
+fn is_alpha(c: char) -> bool {
+    for reserved_char in &RESERVED_CHARS {
+        if *reserved_char == c {
+            return false;
+        }
+    }
+    return true
+}
+
+fn is_alpha_numeric(c: char) -> bool {
+    is_alpha(c) || is_digit(c)
+}
+
 impl <'source> Lexer<'source> {
     fn new(file_contents: &'source str) -> Self {
-        Self { file_contents: UnicodeSegmentation::graphemes(file_contents, true).peekable(), pos: 0, file_position: (1, 0) }
+        Self {
+            file_contents: UnicodeSegmentation::graphemes(file_contents, true).peekable(),
+            pos: 0,
+            file_position: (1, 0)
+        }
     }
 
     fn is_at_end(&mut self) -> bool {
@@ -76,6 +119,24 @@ impl <'source> Lexer<'source> {
             if head == "\n" {
                 break;
             }
+        }
+    }
+
+    fn lex_identifier(&mut self, mut builder: Builder) -> Result<Token, Box<dyn Error>> {
+        let start = self.pos - 1;
+        while let Some(head) = self.file_contents.peek() {
+            // Checks the first character and if it isn't a reserved treat it as valid.
+            // I am sure this won't work with lots of strings...
+            let valid_str = head.chars().nth(0).map(is_alpha_numeric).unwrap_or_default();
+            if valid_str {
+                self.advance().map(|c| builder.append(c));
+            } else {
+                break;
+            }
+        }
+        match builder.string() {
+            Ok(s) => Ok(Token::Identifier(start, s)),
+            Err(_failed_build) => Err("Failed to build a string".into())
         }
     }
 
@@ -176,44 +237,44 @@ impl <'source> Lexer<'source> {
 
             Some("\"") => self.lex_string().map(|token| Some(token)),
 
-            Some("[") => Ok(Some(Token::BracketOpen(self.pos))),
-            Some("]") => Ok(Some(Token::BracketClose(self.pos))),
-            Some("{") => Ok(Some(Token::BraceOpen(self.pos))),
-            Some("}") => Ok(Some(Token::BraceClose(self.pos))),
-            Some(":") => Ok(Some(Token::Colon(self.pos))),
-            Some(",") => Ok(Some(Token::Comma(self.pos))),
+            Some("[") => Ok(Some(Token::BraceOpen(self.pos - 1))),
+            Some("]") => Ok(Some(Token::BraceClose(self.pos - 1))),
+            Some("{") => Ok(Some(Token::BracketOpen(self.pos - 1))),
+            Some("}") => Ok(Some(Token::BracketClose(self.pos - 1))),
+            Some(":") => Ok(Some(Token::Colon(self.pos - 1))),
+            Some(",") => Ok(Some(Token::Comma(self.pos - 1))),
             Some("=") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::DoubleEqual(self.pos)))
+                    Ok(Some(Token::DoubleEqual(self.pos - 1)))
                 } else {
-                    Ok(Some(Token::Equal(self.pos)))
+                    Ok(Some(Token::Equal(self.pos - 1)))
                 }
             }
-            Some(";") => Ok(Some(Token::Semicolon(self.pos))),
+            Some(";") => Ok(Some(Token::Semicolon(self.pos - 1))),
             Some("!") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::BangEqual(self.pos)))
+                    Ok(Some(Token::BangEqual(self.pos - 1)))
                 } else {
-                    Ok(Some(Token::Bang(self.pos)))
+                    Ok(Some(Token::Bang(self.pos - 1)))
                 }
             },
             Some(">") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::GreaterThanOrEqual(self.pos)))
+                    Ok(Some(Token::GreaterThanOrEqual(self.pos - 1)))
                 } else {
-                    Ok(Some(Token::GreaterThan(self.pos)))
+                    Ok(Some(Token::GreaterThan(self.pos - 1)))
                 }
             },
             Some("<") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::LessThanOrEqual(self.pos)))
+                    Ok(Some(Token::LessThanOrEqual(self.pos - 1)))
                 } else {
-                    Ok(Some(Token::LessThan(self.pos)))
+                    Ok(Some(Token::LessThan(self.pos - 1)))
                 }
             },
-            Some(".") => Ok(Some(Token::Dot(self.pos))),
-            Some("+") => Ok(Some(Token::Plus(self.pos))),
-            Some("$") => Ok(Some(Token::Dollar(self.pos))),
+            Some(".") => Ok(Some(Token::Dot(self.pos - 1))),
+            Some("+") => Ok(Some(Token::Plus(self.pos - 1))),
+            Some("$") => Ok(Some(Token::Dollar(self.pos - 1))),
 
             Some("#") => {
                 self.consume_comment();
@@ -233,15 +294,23 @@ impl <'source> Lexer<'source> {
             },
 
             Some(lexme) => {
-                let valid_digit = lexme.chars().nth(0).map(is_digit).unwrap_or_default();
+                let first_char = lexme.chars().nth(0);
+                let valid_digit = first_char.map(is_digit).unwrap_or_default();
+                let valid_alpha = first_char.map(is_alpha).unwrap_or_default();
+
                 if valid_digit {
                     let mut builder = Builder::default();
                     builder.append(lexme);
                     self.lex_number(builder).map(|token| Some(token))
+                } else if valid_alpha {
+                    let mut builder = Builder::default();
+                    builder.append(lexme);
+                    self.lex_identifier(builder).map(|token| Some(token))
+
                 } else {
-                    Err("Unkown token".into())
-                }}
-                ,
+                    Err(format!("Unkown token {lexme}").into())
+                }
+            },
             None => Err("Bad input".into())
         }
     }
@@ -324,10 +393,49 @@ mod tests {
     }
 
     #[test]
+    pub fn array_of_strings() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("[\"sweet\", \"face\", \"nice\"]");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::BraceOpen(0),
+            Token::String(1, "sweet".to_string()),
+            Token::Comma(8),
+            Token::String(10, "face".to_string()),
+            Token::Comma(16),
+            Token::String(18, "nice".to_string()),
+            Token::BraceClose(18 + "\"nice\"".to_string().len()),
+            Token::EOF(25)
+        ];
+
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
+
+    #[test]
+    pub fn array_of_identifiers() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("[sweet, face, nice]");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::BraceOpen(0),
+            Token::Identifier(1, "sweet".to_string()),
+            Token::Comma(6),
+            Token::Identifier(8, "face".to_string()),
+            Token::Comma(12),
+            Token::Identifier(14, "nice".to_string()),
+            Token::BraceClose(18),
+            Token::EOF(19)
+        ];
+
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
+
+    #[test]
     pub fn array_of_booleans() -> Result<(), Box<dyn Error>> {
         let mut lexer = Lexer::new("[true, false, true]");
         let tokens = lexer.tokenize()?;
-        assert_eq!(tokens.len(), 6);
 
         let expected_tokens = vec![
             Token::BraceOpen(0),
