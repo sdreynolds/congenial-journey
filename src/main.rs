@@ -1,4 +1,5 @@
 pub mod lexer;
+pub mod expr;
 
 use std::{env, error::Error};
 
@@ -7,6 +8,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tokens = lexer::run_file(&filename)?;
 
     println!("{:?}", tokens);
+
+    let ast = expr::parse(tokens);
+
+    println!("AST is {}", ast?.render_tree().unwrap());
 
     Ok(())
 }
