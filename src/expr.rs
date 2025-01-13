@@ -180,7 +180,7 @@ impl Parser {
         self.tokens.get(self.current - 1)
     }
 
-    fn unary(&mut self) -> Option<usize> {
+    fn unary(&mut self) -> Option<(usize, ExprType)> {
 
         let found_offset = match self.peek() {
             Some(Token::Bang(_)) => true,
@@ -196,21 +196,21 @@ impl Parser {
         let parsed = {
             if let Some(Token::Bang(offset)) = self.previous() {
                 let operator = Token::Bang(*offset);
-                if let Some(right) = self.unary() {
+                if let Some((right, _)) = self.unary() {
                     self.unary_exprs.push(UnaryExpr{
                         operator,
                         right,
                         right_type: ExprType::Unary,
                     });
 
-                    Some(self.unary_exprs.len() - 1)
-                } else if let Some(right) = self.primary() {
+                    Some((self.unary_exprs.len() - 1, ExprType::Unary))
+                } else if let Some((right, _)) = self.primary() {
                     self.unary_exprs.push(UnaryExpr{
                         operator,
                         right,
                         right_type: ExprType::Literal,
                     });
-                    Some(self.unary_exprs.len() - 1)
+                    Some((self.unary_exprs.len() - 1, ExprType::Unary))
                 } else {
                     None
                 }
@@ -222,7 +222,7 @@ impl Parser {
         parsed
     }
 
-    fn primary(&mut self) -> Option<usize> {
+    fn primary(&mut self) -> Option<(usize, ExprType)> {
         let maybe_literal = match self.peek() {
             Some(Token::Bool(offset, v)) => {
                 Some(LiteralExpr{value: Token::Bool(*offset, *v)})
@@ -236,14 +236,14 @@ impl Parser {
         if maybe_literal.is_some() {
             self.advance();
             self.literal_exprs.push(maybe_literal.unwrap());
-            Some(self.literal_exprs.len() - 1)
+            Some((self.literal_exprs.len() - 1, ExprType::Literal))
         } else {
             None
         }
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some(root) = self.unary() {
+        if let Some((root, _)) = self.unary() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -252,7 +252,7 @@ impl Parser {
                 root_expr_type: ExprType::Unary,
             })
         }
-        else if let Some(root) = self.primary() {
+        else if let Some((root, _)) = self.primary() {
             Some(AST {
             literal_exprs: self.literal_exprs.clone(),
             binary_exprs: self.binary_exprs.clone(),
@@ -348,6 +348,18 @@ mod tests {
         let tokens = vec!(Token::Bang(0), Token::Bool(1, true));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "(! true)".to_string());
+        Ok(())
+    }
+
+    #[test]
+    pub fn parse_and_print_double_equals() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::String(0, "This is awesome".to_string()),
+            Token::DoubleEqual(14),
+            Token::Number(16, 58.0)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(== \"this is awesome\" 58)", ast.render_tree().unwrap());
         Ok(())
     }
 }
