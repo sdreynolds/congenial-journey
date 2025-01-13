@@ -11,6 +11,7 @@ type Offset = usize;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Clone)]
 pub enum Token {
     Bang(Offset),
     BangEqual(Offset),
