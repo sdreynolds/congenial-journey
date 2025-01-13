@@ -180,46 +180,36 @@ impl Parser {
         self.tokens.get(self.current - 1)
     }
 
+    fn binary(&mut self) -> Option<(usize, ExprType)> {
+        unimplemented!()
+    }
+
     fn unary(&mut self) -> Option<(usize, ExprType)> {
-
-        let found_offset = match self.peek() {
-            Some(Token::Bang(_)) => true,
-            _ => false
-        };
-
-        if found_offset {
+        match self.peek() {
+            // Create the operator if possible
+            Some(Token::Bang(offset)) => Some(Token::Bang(*offset)),
+            Some(Token::Minus(offset)) => Some(Token::Minus(*offset)),
+            Some(Token::Plus(offset)) => Some(Token::Plus(*offset)),
+            Some(Token::Tilde(offset)) => Some(Token::Tilde(*offset)),
+            _ => None
+        }.and_then(|operator| {
+            // consume the token
             self.current += 1;
-        } else {
-            return None;
-        }
+            // recurse to find the matching right side
+            if let Some((right, right_type)) = self.unary() {
+                self.unary_exprs.push(UnaryExpr{
+                    operator,
+                    right,
+                    right_type,
+                });
 
-        let parsed = {
-            if let Some(Token::Bang(offset)) = self.previous() {
-                let operator = Token::Bang(*offset);
-                if let Some((right, _)) = self.unary() {
-                    self.unary_exprs.push(UnaryExpr{
-                        operator,
-                        right,
-                        right_type: ExprType::Unary,
-                    });
-
-                    Some((self.unary_exprs.len() - 1, ExprType::Unary))
-                } else if let Some((right, _)) = self.primary() {
-                    self.unary_exprs.push(UnaryExpr{
-                        operator,
-                        right,
-                        right_type: ExprType::Literal,
-                    });
-                    Some((self.unary_exprs.len() - 1, ExprType::Unary))
-                } else {
-                    None
-                }
+                Some((self.unary_exprs.len() - 1, ExprType::Unary))
             } else {
                 None
             }
-        };
-
-        parsed
+        })
+        // recurse to lower priority rule
+        .or_else(|| self.primary())
     }
 
     fn primary(&mut self) -> Option<(usize, ExprType)> {
@@ -230,6 +220,12 @@ impl Parser {
             Some(Token::String(offset, v)) => {
                 Some(LiteralExpr{value: Token::String(*offset, v.clone())})
             },
+            Some(Token::Number(offset, v)) => {
+                Some(LiteralExpr{value: Token::Number(*offset, *v)})
+            }
+            Some(Token::Null(offset)) => {
+                Some(LiteralExpr{value: Token::Null(*offset)})
+            }
             _ => None
         };
 
@@ -243,23 +239,14 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root, _)) = self.unary() {
+        if let Some((root_expr_id, root_expr_type)) = self.unary() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
                 unary_exprs: self.unary_exprs.clone(),
-                root_expr_id: root,
-                root_expr_type: ExprType::Unary,
+                root_expr_id,
+                root_expr_type,
             })
-        }
-        else if let Some((root, _)) = self.primary() {
-            Some(AST {
-            literal_exprs: self.literal_exprs.clone(),
-            binary_exprs: self.binary_exprs.clone(),
-            unary_exprs: self.unary_exprs.clone(),
-            root_expr_id: root,
-            root_expr_type: ExprType::Literal,
-        })
         } else {
             None
         }
@@ -348,6 +335,14 @@ mod tests {
         let tokens = vec!(Token::Bang(0), Token::Bool(1, true));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "(! true)".to_string());
+        Ok(())
+    }
+
+    #[test]
+    pub fn parse_not_not_boolean() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(Token::Bang(0), Token::Bang(0), Token::Bool(2, true));
+        let tree = parse(tokens)?;
+        assert_eq!(tree.render_tree().unwrap(), "(! (! true))".to_string());
         Ok(())
     }
 

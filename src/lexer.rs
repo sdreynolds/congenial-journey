@@ -28,6 +28,8 @@ pub enum Token {
     Equal(Offset),
     DoubleEqual(Offset),
     Semicolon(Offset),
+    Minus(Offset),
+    Tilde(Offset),
 
     Number(Offset, f64),
 
