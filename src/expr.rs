@@ -84,6 +84,7 @@ impl Expr for LiteralExpr {
             Token::Number(_offset, v) => Some(v.to_string()),
             Token::String(_offset, v) => Some(format!("\"{v}\"")),
             Token::Bool(_offset, v) => Some(v.to_string()),
+            Token::Null(_) => Some("null".into()),
             _ => None
         }
     }
@@ -377,6 +378,14 @@ mod tests {
         let tokens = vec!(Token::Bool(0, true));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "true".to_string());
+        Ok(())
+    }
+
+    #[test]
+    pub fn parse_single_null() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(Token::Null(0));
+        let tree = parse(tokens)?;
+        assert_eq!(tree.render_tree().unwrap(), "null".to_string());
         Ok(())
     }
 
