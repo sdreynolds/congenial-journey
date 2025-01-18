@@ -43,6 +43,9 @@ pub enum Token {
     Dot(Offset),
     Plus(Offset),
     Dollar(Offset),
+    Asterisk(Offset),
+    Slash(Offset),
+    Modulo(Offset),
 
     String(Offset, String),
     Identifier(Offset, String),
@@ -299,6 +302,8 @@ impl <'source> Lexer<'source> {
             Some(".") => Ok(Some(Token::Dot(self.pos - 1))),
             Some("+") => Ok(Some(Token::Plus(self.pos - 1))),
             Some("$") => Ok(Some(Token::Dollar(self.pos - 1))),
+            Some("*") => Ok(Some(Token::Asterisk(self.pos - 1))),
+            Some("%") => Ok(Some(Token::Modulo(self.pos - 1))),
 
             Some("#") => {
                 self.consume_comment();
@@ -313,7 +318,7 @@ impl <'source> Lexer<'source> {
                     self.consume_comment();
                     Ok(None)
                 } else {
-                    Err("'/' isn't followed by * or /".into())
+                    Ok(Some(Token::Slash(self.pos - 1)))
                 }
             },
 
@@ -521,6 +526,21 @@ mod tests {
             Token::EOF(18)
         ];
 
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
+
+    #[test]
+    pub fn division() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("24 / 7");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::Number(0, 24.0),
+            Token::Slash(3),
+            Token::Number(5, 7.0),
+            Token::EOF(6)
+        ];
         assert_eq!(tokens, expected_tokens);
         Ok(())
     }

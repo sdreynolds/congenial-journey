@@ -96,6 +96,9 @@ impl Expr for BinaryExpr {
             Token::Dot(_) => Some("."),
             Token::Plus(_) => Some("+"),
             Token::DoubleEqual(_) => Some("=="),
+            Token::Slash(_) => Some("/"),
+            Token::Asterisk(_) => Some("*"),
+            Token::Modulo(_) => Some("%"),
             _ => None
         };
 
@@ -125,6 +128,7 @@ impl Expr for BinaryExpr {
 // u32 is used for the location in the vector
 #[derive(Debug)]
 #[derive(Clone)]
+#[derive(Copy)]
 enum ExprType {
     Literal,
     Binary,
@@ -180,8 +184,29 @@ impl Parser {
         self.tokens.get(self.current - 1)
     }
 
-    fn binary(&mut self) -> Option<(usize, ExprType)> {
-        unimplemented!()
+    fn factor(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.unary() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::Slash(offset) => Some(Token::Slash(*offset)),
+                    Token::Asterisk(offset) => Some(Token::Asterisk(*offset)),
+                    Token::Modulo(offset) => Some(Token::Modulo(*offset)),
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.factor() {
+                    self.binary_exprs.push(
+                        BinaryExpr { left, left_type , right , right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() - 1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
     }
 
     fn unary(&mut self) -> Option<(usize, ExprType)> {
@@ -239,7 +264,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.unary() {
+        if let Some((root_expr_id, root_expr_type)) = self.factor() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -355,6 +380,55 @@ mod tests {
         );
         let ast = parse(tokens)?;
         assert_eq!("(== \"this is awesome\" 58)", ast.render_tree().unwrap());
+        Ok(())
+    }
+    #[test]
+    pub fn parse_and_print_division() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 100.0),
+            Token::Slash(14),
+            Token::Number(16, 58.0)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(/ 100 58)", ast.render_tree().unwrap());
+        Ok(())
+    }
+
+    #[test]
+    pub fn parse_and_print_multiplication() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 100.0),
+            Token::Asterisk(14),
+            Token::Number(16, 58.0)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(* 100 58)", ast.render_tree().unwrap());
+        Ok(())
+    }
+
+    #[test]
+    pub fn parse_and_print_modulo() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 100.0),
+            Token::Modulo(14),
+            Token::Number(16, 58.0)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(% 100 58)", ast.render_tree().unwrap());
+        Ok(())
+    }
+
+    #[test]
+    pub fn multiple_multiplications() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 100.0),
+            Token::Slash(14),
+            Token::Number(20, 40000.23),
+            Token::Asterisk(18),
+            Token::Number(89, 67832.5478)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(/ 100 (* 40000.23 67832.5478))", ast.render_tree().unwrap());
         Ok(())
     }
 }
