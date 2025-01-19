@@ -36,8 +36,10 @@ pub enum Token {
     Local(Offset),
 
     GreaterThan(Offset),
+    ShiftRight(Offset),
     GreaterThanOrEqual(Offset),
     LessThan(Offset),
+    ShiftLeft(Offset),
     LessThanOrEqual(Offset),
 
     Dot(Offset),
@@ -272,7 +274,7 @@ impl <'source> Lexer<'source> {
             Some(",") => Ok(Some(Token::Comma(self.pos - 1))),
             Some("=") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::DoubleEqual(self.pos - 1)))
+                    Ok(Some(Token::DoubleEqual(self.pos - 2)))
                 } else {
                     Ok(Some(Token::Equal(self.pos - 1)))
                 }
@@ -280,21 +282,25 @@ impl <'source> Lexer<'source> {
             Some(";") => Ok(Some(Token::Semicolon(self.pos - 1))),
             Some("!") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::BangEqual(self.pos - 1)))
+                    Ok(Some(Token::BangEqual(self.pos - 2)))
                 } else {
                     Ok(Some(Token::Bang(self.pos - 1)))
                 }
             },
             Some(">") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::GreaterThanOrEqual(self.pos - 1)))
+                    Ok(Some(Token::GreaterThanOrEqual(self.pos - 2)))
+                } else if self.match_pos_and_advance('>') {
+                    Ok(Some(Token::ShiftRight(self.pos - 2)))
                 } else {
                     Ok(Some(Token::GreaterThan(self.pos - 1)))
                 }
             },
             Some("<") => {
                 if self.match_pos_and_advance('=') {
-                    Ok(Some(Token::LessThanOrEqual(self.pos - 1)))
+                    Ok(Some(Token::LessThanOrEqual(self.pos - 2)))
+                } else if self.match_pos_and_advance('<' ){
+             Ok(Some(Token::ShiftLeft(self.pos - 2 )))
                 } else {
                     Ok(Some(Token::LessThan(self.pos - 1)))
                 }
@@ -545,5 +551,19 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    pub fn shift_operator() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("24 << 7");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::Number(0, 24.0),
+            Token::ShiftLeft(3),
+            Token::Number(6, 7.0),
+            Token::EOF(7)
+        ];
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
 
 }

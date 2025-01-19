@@ -101,6 +101,8 @@ impl Expr for BinaryExpr {
             Token::Asterisk(_) => Some("*"),
             Token::Modulo(_) => Some("%"),
             Token::Minus(_) => Some("-"),
+            Token::ShiftLeft(_) => Some("<<"),
+            Token::ShiftRight(_) => Some(">>"),
             _ => None
         };
 
@@ -184,6 +186,30 @@ impl Parser {
 
     fn previous(&self) -> Option<&Token> {
         self.tokens.get(self.current - 1)
+    }
+
+    fn shift(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.term() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::ShiftRight(offset) => Some(Token::ShiftRight(*offset)),
+                    Token::ShiftLeft(offset) => Some(Token::ShiftLeft(*offset)),
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.term() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() - 1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
     }
 
     fn term (&mut self) -> Option<(usize, ExprType)> {
@@ -290,7 +316,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.term() {
+        if let Some((root_expr_id, root_expr_type)) = self.shift() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -492,6 +518,32 @@ mod tests {
         );
         let ast = parse(tokens)?;
         assert_eq!("(- 200 (* 45 76))", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn shift_left() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::ShiftLeft(28),
+            Token::Number(123, 45.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(<< 200 45)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn shift_right() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::ShiftRight(28),
+            Token::Number(123, 45.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(>> 200 45)", ast.render_tree().unwrap());
 
         Ok(())
     }
