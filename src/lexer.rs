@@ -48,6 +48,13 @@ pub enum Token {
     Asterisk(Offset),
     Slash(Offset),
     Modulo(Offset),
+    Ampersand(Offset),
+    Caret(Offset),
+    Bar(Offset),
+
+    And(Offset),
+    Or(Offset),
+
 
     String(Offset, String),
     Identifier(Offset, String),
@@ -300,7 +307,7 @@ impl <'source> Lexer<'source> {
                 if self.match_pos_and_advance('=') {
                     Ok(Some(Token::LessThanOrEqual(self.pos - 2)))
                 } else if self.match_pos_and_advance('<' ){
-             Ok(Some(Token::ShiftLeft(self.pos - 2 )))
+                    Ok(Some(Token::ShiftLeft(self.pos - 2 )))
                 } else {
                     Ok(Some(Token::LessThan(self.pos - 1)))
                 }
@@ -310,6 +317,21 @@ impl <'source> Lexer<'source> {
             Some("$") => Ok(Some(Token::Dollar(self.pos - 1))),
             Some("*") => Ok(Some(Token::Asterisk(self.pos - 1))),
             Some("%") => Ok(Some(Token::Modulo(self.pos - 1))),
+            Some("&") => {
+                if self.match_pos_and_advance('&') {
+                    Ok(Some(Token::And(self.pos - 2)))
+                } else {
+                    Ok(Some(Token::Ampersand(self.pos - 1)))
+                }
+            }
+            Some("|") => {
+                if self.match_pos_and_advance('|') {
+                    Ok(Some(Token::Or(self.pos - 2)))
+                } else {
+                    Ok(Some(Token::Bar(self.pos - 1)))
+                }
+            }
+            Some("^") => Ok(Some(Token::Caret(self.pos - 1))),
 
             Some("#") => {
                 self.consume_comment();
@@ -566,4 +588,56 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    pub fn bitwise_xor_operator() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("24 ^ 7");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::Number(0, 24.0),
+            Token::Caret(3),
+            Token::Number(5, 7.0),
+            Token::EOF(6)
+        ];
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
+
+    #[test]
+    pub fn bitwise_or_operator() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("24 | 7");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::Number(0, 24.0),
+            Token::Bar(3),
+            Token::Number(5, 7.0),
+            Token::EOF(6)
+        ];
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
+
+    #[test]
+    pub fn boolean_expression() -> Result<(), Box<dyn Error>> {
+        let mut lexer = Lexer::new("24 > 0 && 14 < 12 || 78 != 96");
+        let tokens = lexer.tokenize()?;
+
+        let expected_tokens = vec![
+            Token::Number(0, 24.0),
+            Token::GreaterThan(3),
+            Token::Number(5, 0.0),
+            Token::And(7),
+            Token::Number(10, 14.0),
+            Token::LessThan(13),
+            Token::Number(15, 12.0),
+            Token::Or(18),
+            Token::Number(21, 78.0),
+            Token::BangEqual(24),
+            Token::Number(27, 96.0),
+            Token::EOF(29)
+        ];
+        assert_eq!(tokens, expected_tokens);
+        Ok(())
+    }
 }

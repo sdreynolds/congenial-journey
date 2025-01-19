@@ -108,6 +108,11 @@ impl Expr for BinaryExpr {
             Token::LessThan(_) => Some("<"),
             Token::GreaterThanOrEqual(_) => Some(">="),
             Token::LessThanOrEqual(_) => Some("<="),
+            Token::Ampersand(_) => Some("&"),
+            Token::Caret(_) => Some("^"),
+            Token::Bar(_) => Some("|"),
+            Token::And(_) => Some("&&"),
+            Token::Or(_) => Some("||"),
 
             _ => None
         };
@@ -192,6 +197,126 @@ impl Parser {
 
     fn previous(&self) -> Option<&Token> {
         self.tokens.get(self.current - 1)
+    }
+
+    fn boolean_or(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.boolean_and() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::Or(offset) => Some(Token::Or(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.boolean_or() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
+    }
+
+    fn boolean_and(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.bitwise_or() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::And(offset) => Some(Token::And(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.boolean_and() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
+    }
+
+    fn bitwise_or(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.bitwise_xor() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::Bar(offset) => Some(Token::Bar(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.bitwise_or() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
+    }
+
+    fn bitwise_xor(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.bitwise_and() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::Caret(offset) => Some(Token::Caret(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.bitwise_xor() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
+    }
+
+    fn bitwise_and(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.equals() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::Ampersand(offset) => Some(Token::Ampersand(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.bitwise_and() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
     }
 
     fn equals(&mut self) -> Option<(usize, ExprType)> {
@@ -374,7 +499,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.equals() {
+        if let Some((root_expr_id, root_expr_type)) = self.boolean_or() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -617,6 +742,80 @@ mod tests {
         );
         let ast = parse(tokens)?;
         assert_eq!("(>= 200 (< 450 780.7))", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn bitwise_and() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::Ampersand(2),
+            Token::Number(0, 450.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(& 200 450)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn bitwise_xor() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::Caret(2),
+            Token::Number(0, 450.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(^ 200 450)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn bitwise_or() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::Bar(2),
+            Token::Number(0, 450.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(| 200 450)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn boolean_and() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::And(2),
+            Token::Number(0, 450.0),
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(&& 200 450)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn booleans() -> Result<(), Box<dyn Error>> {
+        let tokens = vec![
+            Token::Number(0, 24.0),
+            Token::GreaterThan(3),
+            Token::Number(5, 0.0),
+            Token::And(7),
+            Token::Number(10, 14.0),
+            Token::LessThan(13),
+            Token::Number(15, 12.0),
+            Token::Or(18),
+            Token::Number(21, 78.0),
+            Token::BangEqual(24),
+            Token::Number(27, 96.0),
+            Token::EOF(29)
+        ];
+        let ast = parse(tokens)?;
+        assert_eq!("(|| (&& (> 24 0) (< 14 12)) (!= 78 96))", ast.render_tree().unwrap());
 
         Ok(())
     }
