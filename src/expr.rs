@@ -97,6 +97,7 @@ impl Expr for BinaryExpr {
             Token::Dot(_) => Some("."),
             Token::Plus(_) => Some("+"),
             Token::DoubleEqual(_) => Some("=="),
+            Token::BangEqual(_) => Some("!="),
             Token::Slash(_) => Some("/"),
             Token::Asterisk(_) => Some("*"),
             Token::Modulo(_) => Some("%"),
@@ -191,6 +192,31 @@ impl Parser {
 
     fn previous(&self) -> Option<&Token> {
         self.tokens.get(self.current - 1)
+    }
+
+    fn equals(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.comparison() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::BangEqual(offset) => Some(Token::BangEqual(*offset)),
+                    Token::DoubleEqual(offset) => Some(Token::DoubleEqual(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.equals() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
     }
 
     fn comparison(&mut self) -> Option<(usize, ExprType)> {
@@ -348,7 +374,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.comparison() {
+        if let Some((root_expr_id, root_expr_type)) = self.equals() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -471,7 +497,7 @@ mod tests {
             Token::Number(16, 58.0)
         );
         let ast = parse(tokens)?;
-        assert_eq!("(== \"this is awesome\" 58)", ast.render_tree().unwrap());
+        assert_eq!("(== \"This is awesome\" 58)", ast.render_tree().unwrap());
         Ok(())
     }
     #[test]
