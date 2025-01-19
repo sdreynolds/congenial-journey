@@ -103,6 +103,11 @@ impl Expr for BinaryExpr {
             Token::Minus(_) => Some("-"),
             Token::ShiftLeft(_) => Some("<<"),
             Token::ShiftRight(_) => Some(">>"),
+            Token::GreaterThan(_) => Some(">"),
+            Token::LessThan(_) => Some("<"),
+            Token::GreaterThanOrEqual(_) => Some(">="),
+            Token::LessThanOrEqual(_) => Some("<="),
+
             _ => None
         };
 
@@ -188,6 +193,33 @@ impl Parser {
         self.tokens.get(self.current - 1)
     }
 
+    fn comparison(&mut self) -> Option<(usize, ExprType)> {
+        if let Some((left, left_type)) = self.shift() {
+            self.peek().and_then(|token| {
+                match token {
+                    Token::GreaterThan(offset) => Some(Token::GreaterThan(*offset)),
+                    Token::LessThan(offset) => Some(Token::LessThan(*offset)),
+                    Token::GreaterThanOrEqual(offset) => Some(Token::GreaterThanOrEqual(*offset)),
+                    Token::LessThanOrEqual(offset) => Some(Token::LessThanOrEqual(*offset)),
+
+                    _ => None
+                }
+            }).and_then(|operator| {
+                self.current += 1;
+                if let Some((right, right_type)) = self.comparison() {
+                    self.binary_exprs.push(
+                        BinaryExpr{left, left_type, right, right_type, operator}
+                    );
+                    Some((self.binary_exprs.len() -1, ExprType::Binary))
+                } else {
+                    None
+                }
+            }).or_else(|| Some((left, left_type)))
+        } else {
+            None
+        }
+    }
+
     fn shift(&mut self) -> Option<(usize, ExprType)> {
         if let Some((left, left_type)) = self.term() {
             self.peek().and_then(|token| {
@@ -198,7 +230,7 @@ impl Parser {
                 }
             }).and_then(|operator| {
                 self.current += 1;
-                if let Some((right, right_type)) = self.term() {
+                if let Some((right, right_type)) = self.shift() {
                     self.binary_exprs.push(
                         BinaryExpr{left, left_type, right, right_type, operator}
                     );
@@ -212,7 +244,7 @@ impl Parser {
         }
     }
 
-    fn term (&mut self) -> Option<(usize, ExprType)> {
+    fn term(&mut self) -> Option<(usize, ExprType)> {
         if let Some((left, left_type)) = self.factor() {
             self.peek().and_then(|token| {
                 match token {
@@ -316,7 +348,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.shift() {
+        if let Some((root_expr_id, root_expr_type)) = self.comparison() {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
@@ -544,6 +576,21 @@ mod tests {
         );
         let ast = parse(tokens)?;
         assert_eq!("(>> 200 45)", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn multiple_compare() -> Result<(), Box<dyn Error>> {
+        let tokens = vec!(
+            Token::Number(0, 200.0),
+            Token::GreaterThanOrEqual(2),
+            Token::Number(0, 450.0),
+            Token::LessThan(0),
+            Token::Number(0, 780.7)
+        );
+        let ast = parse(tokens)?;
+        assert_eq!("(>= 200 (< 450 780.7))", ast.render_tree().unwrap());
 
         Ok(())
     }
