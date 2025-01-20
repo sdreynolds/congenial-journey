@@ -8,6 +8,8 @@ pub struct AST {
     binary_exprs: Vec<BinaryExpr>,
     unary_exprs: Vec<UnaryExpr>,
 
+    parse_errors: Vec<ParseError>,
+
     root_expr_type: ExprType,
     root_expr_id: ExprId,
 }
@@ -30,6 +32,13 @@ impl AST {
             ExprType::Unary => self.unary_exprs.get(self.root_expr_id).and_then(|n| n.tree_render(self)),
         }
     }
+}
+
+#[derive(Clone)]
+#[derive(Debug)]
+struct ParseError {
+    pos: usize,
+    message: String,
 }
 
 trait Expr {
@@ -160,9 +169,12 @@ struct LiteralExpr {
 struct Parser {
     current: usize,
     tokens: Vec<Token>,
+
     literal_exprs: Vec<LiteralExpr>,
     binary_exprs: Vec<BinaryExpr>,
     unary_exprs: Vec<UnaryExpr>,
+
+    parse_errors: Vec<ParseError>,
 }
 
 impl Parser {
@@ -173,6 +185,7 @@ impl Parser {
             literal_exprs: Vec::new(),
             binary_exprs: Vec::new(),
             unary_exprs: Vec::new(),
+            parse_errors: Vec::new(),
         }
     }
 
@@ -499,19 +512,39 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        if let Some((root_expr_id, root_expr_type)) = self.boolean_or() {
+        let mut root_expr_id = None;
+        let mut root_expr_type = None;
+        while !self.is_at_end() {
+            if let Some((found_expr_id, found_expr_type)) = self.boolean_or() {
+                root_expr_type = Some(found_expr_type);
+                root_expr_id = Some(found_expr_id);
+            }
+        }
+
+        let valid_parse = root_expr_id
+            .and(root_expr_type)
+            .and(self.peek())
+            .is_some_and(|token| {
+                if let Token::EOF(_) = token {
+                    true
+                } else {
+                    false
+                }
+            });
+
+
+        if valid_parse {
             Some(AST {
                 literal_exprs: self.literal_exprs.clone(),
                 binary_exprs: self.binary_exprs.clone(),
                 unary_exprs: self.unary_exprs.clone(),
-                root_expr_id,
-                root_expr_type,
+                parse_errors: self.parse_errors.clone(),
+                root_expr_id: root_expr_id.expect("Root expr id should be check by if statement"),
+                root_expr_type: root_expr_type.expect("Root type should be checked above by if statement"),
             })
         } else {
             None
         }
-
-
     }
 }
 
@@ -528,55 +561,29 @@ mod tests {
 
     #[test]
     pub fn print_double_equals() -> Result<(), Box<dyn Error>> {
-        let ast = AST{
-            literal_exprs: vec!(
-                LiteralExpr{value: Token::String(0, "this is awesome".to_string())},
-                LiteralExpr{value: Token::Number(14, 58.0)},
-            ),
-            binary_exprs: vec!(
-                BinaryExpr{
-                    left: 0,
-                    left_type: ExprType::Literal,
-                    right: 1,
-                    right_type: ExprType::Literal,
-                    operator: Token::DoubleEqual(10)
-                }
-            ),
-            unary_exprs: vec!(),
-            root_expr_id: 0,
-            root_expr_type: ExprType::Binary,
-        };
+        let tokens = vec!(Token::String(0, "this is awesome".to_string()),
+                          Token::DoubleEqual(10),
+                          Token::Number(14, 58.0),
+                          Token::EOF(123)
+        );
+        let ast = parse(tokens)?;
+
         assert_eq!("(== \"this is awesome\" 58)", ast.render_tree().unwrap());
         Ok(())
     }
 
     #[test]
     pub fn print_nested_double_equals() -> Result<(), Box<dyn Error>> {
-        let ast = AST{
-            literal_exprs: vec!(
-                LiteralExpr{value: Token::String(0, "this is awesome".to_string())},
-                LiteralExpr{value: Token::Number(14, 58.0)},
-            ),
-            binary_exprs: vec!(
-                BinaryExpr{
-                    left: 0,
-                    left_type: ExprType::Literal,
-                    right: 1,
-                    right_type: ExprType::Binary,
-                    operator: Token::DoubleEqual(10)
-                },
-                BinaryExpr{
-                    left: 0,
-                    left_type: ExprType::Literal,
-                    right: 1,
-                    right_type: ExprType::Literal,
-                    operator: Token::DoubleEqual(40),
-                }
-            ),
-            unary_exprs: vec!(),
-            root_expr_id: 0,
-            root_expr_type: ExprType::Binary,
-        };
+        let tokens = vec!(
+            Token::String(0, "this is awesome".to_string()),
+            Token::DoubleEqual(10),
+            Token::String(0, "this is awesome".to_string()),
+            Token::DoubleEqual(1283),
+            Token::Number(14, 58.0),
+            Token::EOF(123)
+        );
+        let ast = parse(tokens)?;
+
         assert_eq!("(== \"this is awesome\" (== \"this is awesome\" 58))",
                    ast.render_tree().unwrap());
         Ok(())
@@ -584,7 +591,8 @@ mod tests {
 
     #[test]
     pub fn parse_single_boolean() -> Result<(), Box<dyn Error>> {
-        let tokens = vec!(Token::Bool(0, true));
+        let tokens = vec!(Token::Bool(0, true),
+                          Token::EOF(123));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "true".to_string());
         Ok(())
@@ -592,7 +600,8 @@ mod tests {
 
     #[test]
     pub fn parse_single_null() -> Result<(), Box<dyn Error>> {
-        let tokens = vec!(Token::Null(0));
+        let tokens = vec!(Token::Null(0),
+                          Token::EOF(123));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "null".to_string());
         Ok(())
@@ -600,7 +609,8 @@ mod tests {
 
     #[test]
     pub fn parse_not_boolean() -> Result<(), Box<dyn Error>> {
-        let tokens = vec!(Token::Bang(0), Token::Bool(1, true));
+        let tokens = vec!(Token::Bang(0), Token::Bool(1, true),
+                          Token::EOF(123));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "(! true)".to_string());
         Ok(())
@@ -608,7 +618,8 @@ mod tests {
 
     #[test]
     pub fn parse_not_not_boolean() -> Result<(), Box<dyn Error>> {
-        let tokens = vec!(Token::Bang(0), Token::Bang(0), Token::Bool(2, true));
+        let tokens = vec!(Token::Bang(0), Token::Bang(0), Token::Bool(2, true),
+                          Token::EOF(123));
         let tree = parse(tokens)?;
         assert_eq!(tree.render_tree().unwrap(), "(! (! true))".to_string());
         Ok(())
@@ -619,7 +630,8 @@ mod tests {
         let tokens = vec!(
             Token::String(0, "This is awesome".to_string()),
             Token::DoubleEqual(14),
-            Token::Number(16, 58.0)
+            Token::Number(16, 58.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(== \"This is awesome\" 58)", ast.render_tree().unwrap());
@@ -630,7 +642,8 @@ mod tests {
         let tokens = vec!(
             Token::Number(0, 100.0),
             Token::Slash(14),
-            Token::Number(16, 58.0)
+            Token::Number(16, 58.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(/ 100 58)", ast.render_tree().unwrap());
@@ -642,7 +655,8 @@ mod tests {
         let tokens = vec!(
             Token::Number(0, 100.0),
             Token::Asterisk(14),
-            Token::Number(16, 58.0)
+            Token::Number(16, 58.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(* 100 58)", ast.render_tree().unwrap());
@@ -654,7 +668,8 @@ mod tests {
         let tokens = vec!(
             Token::Number(0, 100.0),
             Token::Modulo(14),
-            Token::Number(16, 58.0)
+            Token::Number(16, 58.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(% 100 58)", ast.render_tree().unwrap());
@@ -668,7 +683,8 @@ mod tests {
             Token::Slash(14),
             Token::Number(20, 40000.23),
             Token::Asterisk(18),
-            Token::Number(89, 67832.5478)
+            Token::Number(89, 67832.5478),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(/ 100 (* 40000.23 67832.5478))", ast.render_tree().unwrap());
@@ -682,7 +698,8 @@ mod tests {
             Token::Plus(28),
             Token::Number(123, 45.0),
             Token::Modulo(0),
-            Token::Number(82, 76.0)
+            Token::Number(82, 76.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(+ 200 (% 45 76))", ast.render_tree().unwrap());
@@ -697,7 +714,8 @@ mod tests {
             Token::Minus(28),
             Token::Number(123, 45.0),
             Token::Asterisk(0),
-            Token::Number(82, 76.0)
+            Token::Number(82, 76.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(- 200 (* 45 76))", ast.render_tree().unwrap());
@@ -711,6 +729,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::ShiftLeft(28),
             Token::Number(123, 45.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(<< 200 45)", ast.render_tree().unwrap());
@@ -724,6 +743,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::ShiftRight(28),
             Token::Number(123, 45.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(>> 200 45)", ast.render_tree().unwrap());
@@ -738,7 +758,8 @@ mod tests {
             Token::GreaterThanOrEqual(2),
             Token::Number(0, 450.0),
             Token::LessThan(0),
-            Token::Number(0, 780.7)
+            Token::Number(0, 780.7),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(>= 200 (< 450 780.7))", ast.render_tree().unwrap());
@@ -752,6 +773,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::Ampersand(2),
             Token::Number(0, 450.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(& 200 450)", ast.render_tree().unwrap());
@@ -765,6 +787,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::Caret(2),
             Token::Number(0, 450.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(^ 200 450)", ast.render_tree().unwrap());
@@ -778,6 +801,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::Bar(2),
             Token::Number(0, 450.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(| 200 450)", ast.render_tree().unwrap());
@@ -791,6 +815,7 @@ mod tests {
             Token::Number(0, 200.0),
             Token::And(2),
             Token::Number(0, 450.0),
+            Token::EOF(123)
         );
         let ast = parse(tokens)?;
         assert_eq!("(&& 200 450)", ast.render_tree().unwrap());
