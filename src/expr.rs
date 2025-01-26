@@ -2,6 +2,8 @@ use std::error::Error;
 
 use crate::lexer::Token;
 
+type StatementRoot = (ExprType, ExprId);
+
 #[derive(Debug)]
 pub struct AST {
     literal_exprs: Vec<LiteralExpr>,
@@ -10,8 +12,7 @@ pub struct AST {
 
     parse_errors: Vec<ParseError>,
 
-    root_expr_type: ExprType,
-    root_expr_id: ExprId,
+    statement_roots: Vec<StatementRoot>,
 }
 
 impl AST {
@@ -26,11 +27,23 @@ impl AST {
     }
 
     pub fn render_tree(&self) -> Option<String> {
-        match self.root_expr_type {
-            ExprType::Literal => self.literal_exprs.get(self.root_expr_id).and_then(|n| n.tree_render(self)),
-            ExprType::Binary => self.binary_exprs.get(self.root_expr_id).and_then(|n| n.tree_render(self)),
-            ExprType::Unary => self.unary_exprs.get(self.root_expr_id).and_then(|n| n.tree_render(self)),
+        let mut output: String = "".to_owned();
+        let mut first = true;
+        for (root_expr_type, root_expr_id) in &self.statement_roots {
+            let root_result = match root_expr_type {
+                ExprType::Literal => self.literal_exprs.get(*root_expr_id).and_then(|n| n.tree_render(self)),
+                ExprType::Binary => self.binary_exprs.get(*root_expr_id).and_then(|n| n.tree_render(self)),
+                ExprType::Unary => self.unary_exprs.get(*root_expr_id).and_then(|n| n.tree_render(self)),
+            }.unwrap_or("".to_string());
+            if !first {
+                output.push('\n');
+            } else {
+                first = false;
+            }
+            output.push_str(&root_result);
         }
+
+        Some(output)
     }
 }
 
@@ -50,10 +63,8 @@ type ExprId = usize;
 #[derive(Debug)]
 #[derive(Clone)]
 struct BinaryExpr {
-    left: ExprId,
-    left_type: ExprType,
-    right: ExprId,
-    right_type: ExprType,
+    left: StatementRoot,
+    right: StatementRoot,
     operator: Token
 }
 
@@ -61,8 +72,7 @@ struct BinaryExpr {
 #[derive(Clone)]
 struct UnaryExpr {
     operator: Token,
-    right: ExprId,
-    right_type: ExprType,
+    right: StatementRoot,
 }
 
 impl Expr for UnaryExpr {
@@ -72,10 +82,10 @@ impl Expr for UnaryExpr {
             _ => None
         };
 
-        let right_str = match self.right_type {
-            ExprType::Literal => tree.get_literal_expr(self.right).and_then(|r| r.tree_render(tree)),
-            ExprType::Binary => tree.get_binary_expr(self.right).and_then(|r| r.tree_render(tree)),
-            ExprType::Unary => tree.get_unary_expr(self.right).and_then(|r| r.tree_render(tree)),
+        let right_str = match self.right {
+            (ExprType::Literal, right_idx) => tree.get_literal_expr(right_idx).and_then(|r| r.tree_render(tree)),
+            (ExprType::Binary, right_idx) => tree.get_binary_expr(right_idx).and_then(|r| r.tree_render(tree)),
+            (ExprType::Unary, right_idx) => tree.get_unary_expr(right_idx).and_then(|r| r.tree_render(tree)),
         };
 
         if let (Some(op), Some(right)) = (operator_str, right_str) {
@@ -126,16 +136,16 @@ impl Expr for BinaryExpr {
             _ => None
         };
 
-        let left_str = match self.left_type {
-            ExprType::Literal => tree.get_literal_expr(self.left).and_then(|l| l.tree_render(tree)),
-            ExprType::Binary => tree.get_binary_expr(self.left).and_then(|l| l.tree_render(tree)),
-            ExprType::Unary => tree.get_unary_expr(self.left).and_then(|l| l.tree_render(tree)),
+        let left_str = match self.left {
+            (ExprType::Literal, left_idx) => tree.get_literal_expr(left_idx).and_then(|l| l.tree_render(tree)),
+            (ExprType::Binary, left_idx) => tree.get_binary_expr(left_idx).and_then(|l| l.tree_render(tree)),
+            (ExprType::Unary, left_idx) => tree.get_unary_expr(left_idx).and_then(|l| l.tree_render(tree)),
         };
 
-        let right_str = match self.right_type {
-            ExprType::Literal => tree.get_literal_expr(self.right).and_then(|r| r.tree_render(tree)),
-            ExprType::Binary => tree.get_binary_expr(self.right).and_then(|r| r.tree_render(tree)),
-            ExprType::Unary => tree.get_unary_expr(self.right).and_then(|r| r.tree_render(tree)),
+        let right_str = match self.right {
+            (ExprType::Literal, right_idx) => tree.get_literal_expr(right_idx).and_then(|r| r.tree_render(tree)),
+            (ExprType::Binary, right_idx) => tree.get_binary_expr(right_idx).and_then(|r| r.tree_render(tree)),
+            (ExprType::Unary, right_idx) => tree.get_unary_expr(right_idx).and_then(|r| r.tree_render(tree)),
         };
 
 
@@ -224,7 +234,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.boolean_or() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -248,7 +258,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.boolean_and() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -272,7 +282,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.bitwise_or() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left:(left_type, left), right:(right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -296,7 +306,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.bitwise_xor() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right:(right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -320,7 +330,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.bitwise_and() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -345,7 +355,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.equals() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -372,7 +382,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.comparison() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() -1, ExprType::Binary))
                 } else {
@@ -396,7 +406,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.shift() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() - 1, ExprType::Binary))
                 } else {
@@ -420,7 +430,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.term() {
                     self.binary_exprs.push(
-                        BinaryExpr{left, left_type, right, right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() - 1, ExprType::Binary))
                 } else {
@@ -445,7 +455,7 @@ impl Parser {
                 self.current += 1;
                 if let Some((right, right_type)) = self.factor() {
                     self.binary_exprs.push(
-                        BinaryExpr { left, left_type , right , right_type, operator}
+                        BinaryExpr{left: (left_type, left), right: (right_type, right), operator}
                     );
                     Some((self.binary_exprs.len() - 1, ExprType::Binary))
                 } else {
@@ -472,8 +482,7 @@ impl Parser {
             if let Some((right, right_type)) = self.unary() {
                 self.unary_exprs.push(UnaryExpr{
                     operator,
-                    right,
-                    right_type,
+                    right: (right_type, right),
                 });
 
                 Some((self.unary_exprs.len() - 1, ExprType::Unary))
@@ -512,18 +521,24 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Option<AST> {
-        let mut root_expr_id = None;
-        let mut root_expr_type = None;
+        let mut roots = vec!();
         while !self.is_at_end() {
             if let Some((found_expr_id, found_expr_type)) = self.boolean_or() {
-                root_expr_type = Some(found_expr_type);
-                root_expr_id = Some(found_expr_id);
+                roots.push((found_expr_type, found_expr_id));
+
+                // Sync point. have to move forward enough to get it going again.
+                let next_is_semicolon = match self.peek() {
+                    Some(Token::Semicolon(_)) => true,
+                    _ => false
+
+                };
+                if next_is_semicolon {
+                    self.advance();
+                }
             }
         }
 
-        let valid_parse = root_expr_id
-            .and(root_expr_type)
-            .and(self.peek())
+        let valid_parse = self.peek()
             .is_some_and(|token| {
                 if let Token::EOF(_) = token {
                     true
@@ -539,8 +554,7 @@ impl Parser {
                 binary_exprs: self.binary_exprs.clone(),
                 unary_exprs: self.unary_exprs.clone(),
                 parse_errors: self.parse_errors.clone(),
-                root_expr_id: root_expr_id.expect("Root expr id should be check by if statement"),
-                root_expr_type: root_expr_type.expect("Root type should be checked above by if statement"),
+                statement_roots: roots,
             })
         } else {
             None
@@ -841,6 +855,24 @@ mod tests {
         ];
         let ast = parse(tokens)?;
         assert_eq!("(|| (&& (> 24 0) (< 14 12)) (!= 78 96))", ast.render_tree().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn multi_expr() -> Result<(), Box<dyn Error>> {
+        let tokens = vec![
+            Token::Number(0, 24.0),
+            Token::GreaterThan(3),
+            Token::Number(5, 0.0),
+            Token::Semicolon(6),
+            Token::Number(10, 14.0),
+            Token::LessThan(13),
+            Token::Number(15, 12.0),
+            Token::EOF(29)
+        ];
+        let ast = parse(tokens)?;
+        assert_eq!("(> 24 0)\n(< 14 12)", ast.render_tree().unwrap());
 
         Ok(())
     }
